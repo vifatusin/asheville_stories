@@ -1,0 +1,89 @@
+---
+title: "climate_flood_race"
+output: html_document
+date: "2024-08-11"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# turn off scientific notation
+options(scipen=999)
+
+# loading libraries
+library(tidyverse)
+library(janitor)
+library(sf)
+library(tidycensus)
+library(tigris)
+library(tidyr)
+library(purrr)
+library(geojsonio)
+library(crsuggest)
+library(mapview)
+library(stringr)
+library(svglite)
+library(ggplot2)
+```
+
+```{r}
+# first map, flood hazard lines in Asheville from North Carolina Flood Risk Information System
+
+# Read in the GeoJSON files
+flood_map <- st_read("nfirm_flood_map/Flood_Hazard_Lines.shp")
+asheville <- st_read("maps_to_use/avl_city.geojson")
+
+# Plotting the data
+p <- ggplot() +
+  geom_sf(data = flood_map, fill = "white", color = "grey") + 
+  geom_sf(data = asheville, fill = NA, color = "red") + 
+  theme_void()
+
+# Exporting the plot as an SVG file
+svglite::svglite("nfirm_flood_map/asheville_flood_map.svg", width = 10, height = 7)
+print(p)
+dev.off()
+```
+
+```{r}
+# second lower maps: BIPOC, poverty and social vulnerability.
+
+# loading the data. This data comes from AVL's Climate Justice Map. I'm looking to just get data on flooding and pct of BIPOC population. 
+
+avl_climate_justice <- read_sf("cj_bhcecr.shp")
+
+# specific columns to use: state, county, tract, blkgrp, geoid, name_1, below_pov, bipoc, bipoc_score, poverty_score, cdc_score. Maybe resflood, comflood, maybe not, critflood. 
+
+# selecting those specific columns
+avl_bipoc_pov_flood_data <- avl_climate_justice %>% 
+  clean_names() %>% 
+  select(state, county, tract, blkgrp, geoid, name_1, below_pov, bipoc, bipoc_scor, poverty_sc, rpl_themes, cdc_score, blockgroup, resflood, critflood, comflood)
+
+# checking to see if this is all from Asheville.
+avl_bipoc_pov_flood_data %>% 
+  mapview()
+# the data contains all shapefiles for Buncombe. In Datawrapper or Flourish, we'll remove each block one by one. 
+
+# the map uses "invalid coordinate system," according to Datawrapper. checking what the coordinate system is
+st_crs(avl_bipoc_pov_flood_data)
+
+# changing it to what Datawrapper uses, which is WGS 84, which has the EPSG code '4326'.
+avl_bipoc_pov_flood_data <- st_transform(avl_bipoc_pov_flood_data, crs = 4326)
+
+# moving geoid to the front
+avl_bipoc_pov_flood_data <- avl_bipoc_pov_flood_data %>%
+  mutate(geoid = str_remove(geoid, "^1500000US")) %>% 
+  select(geoid, everything())
+
+# writing it out
+st_write(avl_bipoc_pov_flood_data, "avl_bipoc_pov_flood_data.geojson")
+
+# removing the geometry column 
+avl_bipoc_pov_flood <- sf::st_drop_geometry(avl_bipoc_pov_flood_data) 
+
+# after putting it into Datawrapper, I noticed that the GEOID are a little problematic. We need to remove "1500000US" from each geoid under the geoid column. 
+
+# writing it out to csv
+write.csv(avl_bipoc_pov_flood, "avl_bipoc_pov_flood_2.csv")
+```
+
