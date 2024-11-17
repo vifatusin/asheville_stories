@@ -1,0 +1,124 @@
+---
+title: "Analysis of Flood Insurance in Buncombe"
+output: html_document
+date: "2024-10-04"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# turn off scientific notation
+options(scipen=999)
+
+# loading libraries
+library(tidyverse)
+library(janitor)
+library(sf)
+library(tidycensus)
+library(tigris)
+library(tidyr)
+library(purrr)
+library(geojsonio)
+library(crsuggest)
+library(mapview)
+library(stringr)
+library(jsonlite)
+
+# keys
+# census_api_key("519f4ea81ff972e40e78e7c77e0eabc805e05ae9", install = TRUE)
+```
+
+```{r}
+# first data viz: WNC counties policies by number of structures. 
+
+## NFIP data:
+national_flooding_policies_original <- read.csv("nfip_policy-information-by-state_20240831.csv")
+
+wnc_flood_policies <- national_flooding_policies_original %>% 
+  clean_names() %>% 
+  filter(state == "NORTH CAROLINA")
+  
+wnc_flood_policies <- wnc_flood_policies %>% 
+  filter(county == "ALEXANDER COUNTY" | county == "ALLEGHANY COUNTY" | county == "ASHE COUNTY" | county == "AVERY COUNTY" |
+           county == "BUNCOMBE COUNTY" | county == "BURKE COUNTY" | county == "CALDWELL COUNTY" | county == "CATAWBA COUNTY" |
+           county == "CLAY COUNTY" | county == "CLEVELAND COUNTY" | county == "GASTON COUNTY" | county == "HAYWOOD COUNTY" |
+           county == "HENDERSON COUNTY" | county == "JACKSON COUNTY" | county == "LINCOLN COUNTY" | county == "MACON COUNTY" |
+           county == "MADISON COUNTY" | county == "MCDOWELL COUNTY" | county == "MECKLENBURG COUNTY" | county == "MITCHELL COUNTY" | county == "POLK COUNTY" | county == "RUTHERFORD COUNTY" | county == "SWAIN COUNTY" | county ==
+           "TRANSYLVANIA COUNTY" | county == "WATAUGA COUNTY" | county == "WILKES COUNTY" | county == "YANCEY COUNTY") %>% 
+  mutate(across(c(total_coverage, total_written_premium_fpf, total_annual_payment), ~ as.numeric(str_replace_all(., "[\\$, ]","")))) %>% 
+  mutate(policies_in_force = as.numeric(policies_in_force)) %>% 
+  mutate(across(everything(), ~replace_na(.,0)))
+  
+grouped_wnc_flood_policies <- wnc_flood_policies %>% 
+  group_by(county) %>% 
+  summarise(total_policies = sum(policies_in_force),
+            total_coverage_all = sum(total_coverage),
+            total_premium_fpf_all = sum(total_written_premium_fpf),
+            total_annual_payment_all = sum(total_annual_payment))
+
+## home census data:
+vars <- load_variables(year = 2022,
+                       dataset = "acs5",
+                       cache = TRUE)
+### B25001_001 -- total housing units
+
+acs_2022_housing_units <- get_acs(geography = "county",
+                                  variables = c(homes = "B25001_001"),
+                                  state = "NC",
+                                  year = 2022,
+                                  survey = "acs5",
+                                  geometry = TRUE) %>% 
+  mutate(NAME = str_remove(NAME, ", North Carolina"),
+         NAME = str_to_upper(NAME)) %>%
+  filter(NAME == "ALEXANDER COUNTY" | NAME == "ALLEGHANY COUNTY" | NAME == "ASHE COUNTY" | NAME == "AVERY COUNTY" |
+           NAME == "BUNCOMBE COUNTY" | NAME == "BURKE COUNTY" | NAME == "CALDWELL COUNTY" | NAME == "CATAWBA COUNTY" |
+           NAME == "CLAY COUNTY" | NAME == "CLEVELAND COUNTY" | NAME == "GASTON COUNTY" | NAME == "HAYWOOD COUNTY" |
+           NAME == "HENDERSON COUNTY" | NAME == "JACKSON COUNTY" | NAME == "LINCOLN COUNTY" | NAME == "MACON COUNTY" |
+           NAME == "MADISON COUNTY" | NAME == "MCDOWELL COUNTY" | NAME == "MECKLENBURG COUNTY" | NAME == "MITCHELL COUNTY" | 
+           NAME == "POLK COUNTY" | NAME == "RUTHERFORD COUNTY" | NAME == "SWAIN COUNTY" | NAME == "TRANSYLVANIA COUNTY" | 
+           NAME == "WATAUGA COUNTY" | NAME == "WILKES COUNTY" | NAME == "YANCEY COUNTY") %>% 
+  select(-variable, -moe) %>% 
+  rename(homes = estimate)
+
+# number of businesses
+wnc_establishments <- read.csv("wnc_establishments.csv") %>% 
+  mutate(NAME = str_remove(NAME, ", North Carolina"),
+         NAME = str_to_upper(NAME)) %>% 
+  select(NAME, ESTAB)
+  
+wnc_flood_policy_homes <- acs_2022_housing_units %>% 
+  inner_join(grouped_wnc_flood_policies, by=c('NAME' = 'county'))
+
+wnc_flood_policy_homes <- wnc_flood_policy_homes %>% 
+  inner_join(wnc_establishments, by=c('NAME')) %>% 
+  mutate(ESTAB = as.numeric(ESTAB)) %>%  
+  mutate(homes_establishments = homes + ESTAB) %>% 
+  mutate(perc_policy_to_structure = (total_policies/homes_establishments)*100) %>% 
+
+
+# second data viz Part I: Simple bar chart of number of policies for available cities in Buncombe 
+buncombe_flood_policies <- national_flooding_policies_original %>% 
+  clean_names() %>% 
+  filter(state == "NORTH CAROLINA" & county == "BUNCOMBE COUNTY")
+
+
+
+write.csv(buncombe_flood_policies, "buncombe_flood_policies.csv")
+st_write(wnc_flood_policy_homes, "wnc_flood_policies_all.geojson")
+
+wnc_flood_policy_homes_no_geometry <- wnc_flood_policy_homes %>% 
+  st_drop_geometry()
+
+write.csv(wnc_flood_policy_homes_no_geometry, "wnc_flood_policies_all.csv")
+
+
+bunc_2022_housing_units <- get_acs(geography = "county subdivision",
+                                  variables = c(homes = "B25001_001"),
+                                  state = "NC",
+                                  county = "Buncombe County",
+                                  year = 2022,
+                                  survey = "acs5",
+                                  geometry = TRUE)
+
+# AVL Homes: 48302 | AVL Businesses: 14,168 | AVL Altogether = 62,470 | Pct = 0.72
+```
